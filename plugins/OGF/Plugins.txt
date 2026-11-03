@@ -1,0 +1,5 @@
+# Edit this file and rename it as Plugins.txt
+
+add_subdirectory(CurveKID)
+# add_subdirectory(MyPlugin1)
+# add_subdirectory(MyPlugin2)

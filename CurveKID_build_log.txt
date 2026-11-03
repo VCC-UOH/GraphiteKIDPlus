@@ -1,0 +1,301 @@
+Change Dir: 'E:/Research/GraphiteThree/build/Windows'
+
+Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" plugins/OGF/CurveKID/CurveKID.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+MSBuild version 18.11.1-1.26513.3+940033be3 for .NET Framework
+Build started 03/11/2026 6:13:16 pm.
+
+Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" on node 1 (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (1) is building "E:\Research\GraphiteThree\build\Windows\ZERO_CHECK.vcxproj" (2) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+FinalizeBuildStatus:
+  Deleting file "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild".
+  Touching "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\ZERO_CHECK.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\ZERO_CHECK.vcxproj" (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (1) is building "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\basic\basic.vcxproj" (3) on node 1 (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\basic\basic.vcxproj" (3) is building "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram\geogram.vcxproj" (4) on node 1 (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram\geogram.vcxproj" (4) is building "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram\third_party\geogram_third_party.vcxproj" (5) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "geogram_third_party.dir\Release\geogram_.96177592.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "geogram_third_party.dir\Release\geogram_.96177592.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+  All outputs are up-to-date.
+Lib:
+  All outputs are up-to-date.
+  geogram_third_party.vcxproj -> E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram\third_party\geogram_third_party.dir\Release\geogram_third_party.lib
+FinalizeBuildStatus:
+  Deleting file "geogram_third_party.dir\Release\geogram_.96177592.tlog\unsuccessfulbuild".
+  Touching "geogram_third_party.dir\Release\geogram_.96177592.tlog\geogram_third_party.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram\third_party\geogram_third_party.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "geogram.dir\Release\geogram.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "geogram.dir\Release\geogram.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  geogram.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\geogram.dll
+FinalizeBuildStatus:
+  Deleting file "geogram.dir\Release\geogram.tlog\unsuccessfulbuild".
+  Touching "geogram.dir\Release\geogram.tlog\geogram.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram\geogram.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "basic.dir\Release\basic.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "basic.dir\Release\basic.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  basic.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\basic.dll
+FinalizeBuildStatus:
+  Deleting file "basic.dir\Release\basic.tlog\unsuccessfulbuild".
+  Touching "basic.dir\Release\basic.tlog\basic.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\basic\basic.vcxproj" (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (1) is building "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram_gfx\geogram_gfx.vcxproj" (6) on node 1 (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram_gfx\geogram_gfx.vcxproj" (6) is building "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram_gfx\third_party\geogram_gfx_third_party.vcxproj" (7) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "geogram_gfx_third_party.dir\Release\geogram_.543646B5.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "geogram_gfx_third_party.dir\Release\geogram_.543646B5.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+  All outputs are up-to-date.
+Lib:
+  All outputs are up-to-date.
+  geogram_gfx_third_party.vcxproj -> E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram_gfx\third_party\geogram_gfx_third_party.dir\Release\geogram_gfx_third_party.lib
+FinalizeBuildStatus:
+  Deleting file "geogram_gfx_third_party.dir\Release\geogram_.543646B5.tlog\unsuccessfulbuild".
+  Touching "geogram_gfx_third_party.dir\Release\geogram_.543646B5.tlog\geogram_gfx_third_party.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram_gfx\third_party\geogram_gfx_third_party.vcxproj" (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram_gfx\geogram_gfx.vcxproj" (6) is building "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\third_party\glfw\src\glfw.vcxproj" (8) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "glfw.dir\Release\glfw.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "glfw.dir\Release\glfw.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+ResourceCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  glfw.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\glfw3.dll
+FinalizeBuildStatus:
+  Deleting file "glfw.dir\Release\glfw.tlog\unsuccessfulbuild".
+  Touching "glfw.dir\Release\glfw.tlog\glfw.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\third_party\glfw\src\glfw.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "geogram_gfx.dir\Release\geogram_gfx.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "geogram_gfx.dir\Release\geogram_gfx.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  geogram_gfx.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\geogram_gfx.dll
+FinalizeBuildStatus:
+  Deleting file "geogram_gfx.dir\Release\geogram_gfx.tlog\unsuccessfulbuild".
+  Touching "geogram_gfx.dir\Release\geogram_gfx.tlog\geogram_gfx.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\geogram\src\lib\geogram_gfx\geogram_gfx.vcxproj" (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (1) is building "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\gom\gom.vcxproj" (9) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "gom.dir\Release\gom.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "gom.dir\Release\gom.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  gom.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\gom.dll
+FinalizeBuildStatus:
+  Deleting file "gom.dir\Release\gom.tlog\unsuccessfulbuild".
+  Touching "gom.dir\Release\gom.tlog\gom.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\gom\gom.vcxproj" (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (1) is building "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\gom_gom\gom_gom.vcxproj" (10) on node 1 (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\gom_gom\gom_gom.vcxproj" (10) is building "E:\Research\GraphiteThree\build\Windows\src\bin\gomgen\gomgen.vcxproj" (11) on node 1 (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\src\bin\gomgen\gomgen.vcxproj" (11) is building "E:\Research\GraphiteThree\build\Windows\src\lib\third_party\swig\swig.vcxproj" (12) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "swig.dir\Release\swig.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "swig.dir\Release\swig.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+  All outputs are up-to-date.
+Lib:
+  All outputs are up-to-date.
+  swig.vcxproj -> E:\Research\GraphiteThree\build\Windows\lib\Release\swig.lib
+FinalizeBuildStatus:
+  Deleting file "swig.dir\Release\swig.tlog\unsuccessfulbuild".
+  Touching "swig.dir\Release\swig.tlog\swig.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\third_party\swig\swig.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "gomgen.dir\Release\gomgen.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "gomgen.dir\Release\gomgen.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  gomgen.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\gomgen.exe
+FinalizeBuildStatus:
+  Deleting file "gomgen.dir\Release\gomgen.tlog\unsuccessfulbuild".
+  Touching "gomgen.dir\Release\gomgen.tlog\gomgen.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\bin\gomgen\gomgen.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "gom_gom.dir\Release\gom_gom.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "gom_gom.dir\Release\gom_gom.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  gom_gom.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\gom_gom.dll
+FinalizeBuildStatus:
+  Deleting file "gom_gom.dir\Release\gom_gom.tlog\unsuccessfulbuild".
+  Touching "gom_gom.dir\Release\gom_gom.tlog\gom_gom.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\gom_gom\gom_gom.vcxproj" (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (1) is building "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\mesh\mesh.vcxproj" (13) on node 1 (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\mesh\mesh.vcxproj" (13) is building "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\scene_graph\scene_graph.vcxproj" (14) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "scene_graph.dir\Release\scene_graph.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "scene_graph.dir\Release\scene_graph.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  scene_graph.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\scene_graph.dll
+FinalizeBuildStatus:
+  Deleting file "scene_graph.dir\Release\scene_graph.tlog\unsuccessfulbuild".
+  Touching "scene_graph.dir\Release\scene_graph.tlog\scene_graph.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\scene_graph\scene_graph.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "mesh.dir\Release\mesh.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "mesh.dir\Release\mesh.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  mesh.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\mesh.dll
+FinalizeBuildStatus:
+  Deleting file "mesh.dir\Release\mesh.tlog\unsuccessfulbuild".
+  Touching "mesh.dir\Release\mesh.tlog\mesh.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\mesh\mesh.vcxproj" (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (1) is building "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\mesh_gfx\mesh_gfx.vcxproj" (15) on node 1 (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\mesh_gfx\mesh_gfx.vcxproj" (15) is building "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\renderer\renderer.vcxproj" (16) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "renderer.dir\Release\renderer.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "renderer.dir\Release\renderer.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  renderer.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\renderer.dll
+FinalizeBuildStatus:
+  Deleting file "renderer.dir\Release\renderer.tlog\unsuccessfulbuild".
+  Touching "renderer.dir\Release\renderer.tlog\renderer.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\renderer\renderer.vcxproj" (default targets).
+Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\mesh_gfx\mesh_gfx.vcxproj" (15) is building "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\scene_graph_gfx\scene_graph_gfx.vcxproj" (17) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "scene_graph_gfx.dir\Release\scene_graph_gfx.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "scene_graph_gfx.dir\Release\scene_graph_gfx.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  scene_graph_gfx.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\scene_graph_gfx.dll
+FinalizeBuildStatus:
+  Deleting file "scene_graph_gfx.dir\Release\scene_graph_gfx.tlog\unsuccessfulbuild".
+  Touching "scene_graph_gfx.dir\Release\scene_graph_gfx.tlog\scene_graph_gfx.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\scene_graph_gfx\scene_graph_gfx.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Creating "mesh_gfx.dir\Release\mesh_gfx.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "mesh_gfx.dir\Release\mesh_gfx.tlog\unsuccessfulbuild".
+CustomBuild:
+  All outputs are up-to-date.
+ClCompile:
+  All outputs are up-to-date.
+Link:
+  All outputs are up-to-date.
+  mesh_gfx.vcxproj -> E:\Research\GraphiteThree\build\Windows\bin\Release\mesh_gfx.dll
+FinalizeBuildStatus:
+  Deleting file "mesh_gfx.dir\Release\mesh_gfx.tlog\unsuccessfulbuild".
+  Touching "mesh_gfx.dir\Release\mesh_gfx.tlog\mesh_gfx.lastbuildstate".
+Done Building Project "E:\Research\GraphiteThree\build\Windows\src\lib\OGF\mesh_gfx\mesh_gfx.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+InitializeBuildStatus:
+  Touching "CurveKID.dir\Release\CurveKID.tlog\unsuccessfulbuild".
+CustomBuild:
+  1>Generating gomgenerated_CurveKID.cpp
+  o-[Gom::CodeGen] Error: Specified include path 'E:/': no such directory
+  The system cannot find the batch label specified - VCEnd
+C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v180\Microsoft.CppCommon.targets(237,5): error MSB8066: Custom build for 'E:\Research\GraphiteThree\build\Windows\CMakeFiles\3f99ad1b9d929864080a88afb114acd3\gomgenerated_CurveKID.cpp.rule' exited with code 1. [E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj]
+Done Building Project "E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (default targets) -- FAILED.
+
+Build FAILED.
+
+"E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj" (default target) (1) ->
+(CustomBuild target) -> 
+  C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v180\Microsoft.CppCommon.targets(237,5): error MSB8066: Custom build for 'E:\Research\GraphiteThree\build\Windows\CMakeFiles\3f99ad1b9d929864080a88afb114acd3\gomgenerated_CurveKID.cpp.rule' exited with code 1. [E:\Research\GraphiteThree\build\Windows\plugins\OGF\CurveKID\CurveKID.vcxproj]
+
+    0 Warning(s)
+    1 Error(s)
+
+Time Elapsed 00:00:01.17
+
