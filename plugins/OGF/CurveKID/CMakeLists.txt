@@ -83,6 +83,12 @@ aux_source_directories(
 
 aux_source_directories(
     SOURCES
+    "Source Files\\algo"
+    algo
+)
+
+aux_source_directories(
+    SOURCES
     "Source Files\\commands"
     commands
 )
