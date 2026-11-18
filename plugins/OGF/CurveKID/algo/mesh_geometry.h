@@ -3,6 +3,8 @@
 
 // -----------------------------------------------------------------------
 // CRITICAL: ALL Geogram headers BEFORE any OGF header.
+// Including Geogram after OGF opens namespace OGF, causing the compiler
+// to see GEO types as OGF::GEO::* — which breaks everything.
 // -----------------------------------------------------------------------
 #include <geogram/mesh/mesh.h>
 #include <geogram/basic/geometry.h>
@@ -17,7 +19,7 @@ namespace OGF {
 namespace CurveKIDAlgo {
 
 // =======================================================================
-// Basic mesh statistics
+// Basic mesh statistics  (unchanged from working build)
 // =======================================================================
 
 struct CurveKID_API MeshStats {
@@ -61,16 +63,21 @@ CurveKID_API void enumerate_triangle_edges(
 // =======================================================================
 
 struct CurveKID_API VertexCurvature {
-    double gaussian = 0.0;
-    double mean     = 0.0;
-    double kappa1   = 0.0;
-    double kappa2   = 0.0;
+    double gaussian = 0.0;  // angle-deficit Gaussian curvature  K = 2π - Σθᵢ
+    double mean     = 0.0;  // cotangent-formula mean curvature  H
+    double kappa1   = 0.0;  // min principal curvature
+    double kappa2   = 0.0;  // max principal curvature
 };
 
+// Compute per-vertex curvatures for all vertices.
+// Uses angle-deficit for K and cotangent formula for H,
+// then extracts kappa1 = H - sqrt(H²-K), kappa2 = H + sqrt(H²-K).
+// Falls back to kappa1=kappa2=H when discriminant < 0 (numerical noise).
 CurveKID_API void compute_vertex_curvatures(
     const GEO::Mesh& mesh,
     std::vector<VertexCurvature>& vcurv);
 
+// Average vertex curvatures to face level (mean over 3 corners).
 struct CurveKID_API FaceCurvature {
     double gaussian = 0.0;
     double mean     = 0.0;
@@ -83,6 +90,9 @@ CurveKID_API void compute_face_curvatures(
     const std::vector<VertexCurvature>& vcurv,
     std::vector<FaceCurvature>& fcurv);
 
+// Fit a sphere to the 1-ring neighbourhood of face f.
+// Collects all vertices in adjacent faces and fits a least-squares sphere.
+// Returns false if neighbourhood is too small or degenerate.
 CurveKID_API bool fit_sphere_to_neighborhood(
     const GEO::Mesh& mesh,
     GEO::index_t f,
@@ -95,11 +105,14 @@ CurveKID_API bool fit_sphere_to_neighborhood(
 // STAGE 2 — Connected patch initialisation
 // =======================================================================
 
+// Grow ~target_count connected patches using region-growing BFS.
+// Each face gets a patch_id in [0, actual_count).
+// Seeds are placed by furthest-point sampling in curvature space.
 CurveKID_API GEO::index_t grow_patches(
     const GEO::Mesh& mesh,
     const std::vector<FaceCurvature>& fcurv,
-    GEO::index_t target_count,
-    std::vector<GEO::index_t>& patch_id
+    GEO::index_t target_count,          // e.g. 100
+    std::vector<GEO::index_t>& patch_id // size = nb_facets
 );
 
 
@@ -110,23 +123,35 @@ CurveKID_API GEO::index_t grow_patches(
 struct CurveKID_API PatchDescriptor {
     GEO::index_t patch_id   = 0;
     GEO::index_t nb_faces   = 0;
+
+    // Sphere fit over all patch vertices (least-squares)
     GEO::vec3   sphere_center;
     double      sphere_radius   = 0.0;
-    double      sphere_residual = 0.0;
+    double      sphere_residual = 0.0;  // RMS distance from vertices to sphere
+
+    // Curvature summary (mean over patch faces)
     double mean_gaussian = 0.0;
     double mean_kappa1   = 0.0;
     double mean_kappa2   = 0.0;
+
+    // Geometry summary
     double total_area    = 0.0;
     double mean_edge_len = 0.0;
+
+    // Template assigned in Stage 4
     GEO::index_t template_id = GEO::index_t(-1);
 };
 
+// Fit a sphere to all vertices belonging to one patch (via patch_id array).
+// Uses iterative least-squares: initialise at centroid + mean distance,
+// then refine with Gauss-Newton.
 CurveKID_API bool fit_sphere_to_patch(
     const GEO::Mesh& mesh,
     const std::vector<GEO::index_t>& patch_id,
     GEO::index_t pid,
     PatchDescriptor& desc);
 
+// Build all patch descriptors at once.
 CurveKID_API void compute_patch_descriptors(
     const GEO::Mesh& mesh,
     const std::vector<GEO::index_t>& patch_id,
@@ -136,21 +161,260 @@ CurveKID_API void compute_patch_descriptors(
 
 
 // =======================================================================
-// STAGE 4 — K-means clustering
+// STAGE 4 — K-means clustering into template families
 // =======================================================================
 
+// Distance between two patch descriptors in feature space.
+// Feature vector: (sphere_radius, mean_kappa1, mean_kappa2, mean_edge_len)
+// Normalised by global std before distance computation.
 CurveKID_API double patch_descriptor_distance(
     const PatchDescriptor& a,
     const PatchDescriptor& b,
-    const double inv_std[4]
+    const double inv_std[4]   // precomputed 1/std for each feature
 );
 
+// Run K-means on patch descriptors.
+// Assigns template_id to each descriptor.
+// Returns final inertia (sum of squared distances to assigned centroid).
 CurveKID_API double cluster_patches_kmeans(
     std::vector<PatchDescriptor>& descs,
-    GEO::index_t K,
+    GEO::index_t K,            // number of templates
     int max_iter = 50
 );
 
+
+// =======================================================================
+// POTTMANN-INSPIRED INIT — Central spheres + spherical face descriptors
+// (experimental alternative to the BFS patch pipeline above;
+//  existing code is preserved and unchanged)
+// =======================================================================
+
+// Per-vertex mean-curvature (central) sphere.
+// centre = v + (1/H)*n,  radius = |1/H|.
+// When |H| < H_eps (flat or saddle near H=0), the sphere is flagged
+// invalid and a fallback osculating-paraboloid radius is stored instead.
+struct CurveKID_API CentralSphere {
+    GEO::vec3 center;          // sphere centre (position-dependent)
+    double    radius  = 0.0;   // |1/H|  or  fallback radius
+    double    H_value = 0.0;   // signed mean curvature at this vertex
+    bool      valid   = false; // false when |H| < H_eps
+};
+
+// Compute one CentralSphere per vertex.
+// H_eps: vertices with |H| < H_eps are treated as near-flat.
+// Fallback for near-flat vertices: radius estimated from local 1-ring
+// geometry (circumradius of 1-ring, as a proxy for curvature radius).
+CurveKID_API void compute_central_spheres(
+    const GEO::Mesh&                    mesh,
+    const std::vector<VertexCurvature>& vcurv,
+    std::vector<CentralSphere>&         cspheres,
+    double H_eps = 0.01         // tune: smaller = more near-flat vertices
+);
+
+// Per-face curvature-adaptive target edge length.
+// g(f) = c / sqrt( max(|H_f|, H_eps) ), clamped to [min_len, max_len].
+// H_f = mean H over the three face vertices.
+// c is chosen so that the mean g equals the mesh mean edge length.
+CurveKID_API void compute_target_edge_lengths(
+    const GEO::Mesh&                    mesh,
+    const std::vector<VertexCurvature>& vcurv,
+    std::vector<double>&                target_len, // one per face
+    double H_eps   = 0.01
+);
+
+// One curved triangular face in the Pottmann-inspired representation.
+// Supporting sphere is fitted using the face's three vertices PLUS
+// the three vertex normals (as tangent-plane constraints), giving a
+// well-determined system even for near-flat faces.
+struct CurveKID_API SphericalFace {
+    GEO::index_t v[3]         = {0,0,0}; // vertex indices
+    GEO::vec3    sphere_center;
+    double       sphere_radius  = 0.0;
+    double       fit_residual   = 0.0;   // RMS point-to-sphere distance
+    bool         valid          = false;
+
+    // Pose-invariant descriptor for K-means classification
+    // (does NOT use sphere_center — position-independent)
+    double desc_radius          = 0.0;   // sphere_radius
+    double desc_arc[3]          = {0,0,0}; // great-circle arc lengths of 3 edges
+    double desc_solid_angle     = 0.0;   // solid angle subtended at sphere centre
+    double desc_mean_H          = 0.0;   // mean |H| over 3 vertices
+};
+
+// =======================================================================
+// CURVED MESH CONSTRUCTION  (Stages 1-4 of CurveKID pipeline)
+// =======================================================================
+
+// One curved triangular face in the output CurveKID mesh.
+// The supporting sphere is fitted to nearby points of the ORIGINAL surface,
+// so the curved triangle approximates the original geometry locally.
+// Shared boundary arcs: for each edge, the arc is on the sphere of
+// whichever adjacent face has the smaller residual (better fit).
+struct CurveKID_API CurvedFace {
+    // Coarse mesh vertex indices (into the coarse mesh, not original)
+    GEO::index_t v[3]            = {0, 0, 0};
+
+    // Supporting sphere fitted to original-surface points near this face
+    GEO::vec3    sphere_center;
+    double       sphere_radius   = 0.0;
+    double       sphere_residual = 0.0;  // RMS original-point to sphere dist
+    bool         valid           = false;
+
+    // Index into coarse mesh facets
+    GEO::index_t face_id         = 0;
+
+    // Approximation quality: mean distance of original mesh vertices
+    // that fall inside this face's Voronoi cell to its sphere
+    double approx_error          = 0.0;
+
+    // Mean |H| of original-mesh neighbourhood — used for classification.
+    // 0 = flat region (sphere fit skipped), >0 = curved region.
+    double mean_H_local;
+};
+
+// Validate mesh topology: check Euler characteristic, boundary edges,
+// non-manifold edges, degenerate faces, and connectivity.
+// Returns true if the mesh is a valid closed manifold triangulation.
+// Logs all failures to GEO::Logger.
+struct CurveKID_API MeshTopologyReport {
+    int  connected_components = 0;
+    int  boundary_edges       = 0;
+    int  nonmanifold_edges    = 0;
+    int  degenerate_faces     = 0;
+    int  euler               = 0;   // V - E + F, should be 2 for a sphere
+    bool face_count_even      = false;
+    bool valid                = false;
+};
+
+CurveKID_API MeshTopologyReport validate_mesh_topology(
+    const GEO::Mesh& mesh,
+    bool log_results = true
+);
+
+// Build a coarse, curvature-adaptive triangular mesh from the input surface.
+// Uses Geogram's mesh_remesh_smooth with per-face target edge lengths.
+// Output coarse_mesh is a NEW mesh (caller clears it first).
+// Returns actual number of coarse faces produced.
+CurveKID_API GEO::index_t build_coarse_mesh(
+    const GEO::Mesh&                    original,
+    const std::vector<VertexCurvature>& vcurv,
+    GEO::Mesh&                          coarse_mesh,
+    GEO::index_t                        target_faces = 500,
+    double                              H_eps        = 0.01
+);
+
+// Fit one CurvedFace per coarse triangle.
+// For each coarse face, collects original-mesh vertices within a search
+// radius (estimated from coarse edge length) and fits a least-squares sphere.
+// orig_index: an AABB/kd-tree built from the original mesh (passed in so
+// it is built once, not per-face).
+CurveKID_API void fit_curved_faces(
+    const GEO::Mesh&              original,
+    const GEO::Mesh&              coarse_mesh,
+    std::vector<CurvedFace>&      cfaces
+);
+
+// Joint sphere optimisation (Pottmann 2023, Sec 4).
+// After independent per-face fitting, runs alternating LS to move
+// coarse vertices and sphere parameters so adjacent spheres intersect
+// in real circles — required for well-defined shared arcs.
+// coarse_mesh vertices are updated in-place.
+CurveKID_API void optimise_joint_spheres(
+    GEO::Mesh&                 coarse_mesh,
+    std::vector<CurvedFace>&   cfaces,
+    int                        max_iter = 20
+);
+
+// Tessellate each CurvedFace onto its supporting sphere and write the
+// result into viz_mesh (cleared first).  Each coarse triangle becomes
+// subdiv*subdiv sub-triangles whose vertices are slerp-projected onto
+// the sphere.  Face attribute "curved_face_id" maps sub-faces back to
+// the coarse face index.
+CurveKID_API void tessellate_curved_faces(
+    const GEO::Mesh&                   coarse_mesh,
+    const std::vector<CurvedFace>&     cfaces,
+    GEO::Mesh&                         viz_mesh,
+    int                                subdiv = 4
+);
+
+// Compute per-original-vertex approximation error:
+// for each original vertex find the nearest CurvedFace sphere and
+// record signed distance.  Writes result into errors (size = nb_vertices).
+CurveKID_API void compute_approximation_error(
+    const GEO::Mesh&                   original,
+    const std::vector<CurvedFace>&     cfaces,
+    std::vector<double>&               errors   // one per original vertex
+);
+
+// =======================================================================
+// CURVED MESH — shared arc resolution
+// =======================================================================
+
+// For each coarse edge shared by two faces, records which face's sphere
+// "wins" (lower residual) and owns the arc.
+// edge_winner[f*3 + local_edge] = index of the winning face for that edge
+// (may be f itself or the adjacent face).
+CurveKID_API void resolve_shared_arcs(
+    const GEO::Mesh&               coarse_mesh,
+    const std::vector<CurvedFace>& cfaces,
+    std::vector<GEO::index_t>&     edge_winner  // size = nf_coarse * 3
+);
+
+// Fit circumsphere through the 3 coarse vertices of face f.
+// C = circumcenter + t * face_normal,  R = |C - v0|.
+// t=0 gives the circumscribed sphere of the triangle in its own plane
+//   (infinite radius for a flat triangle lying in one plane — degenerate).
+// A small nonzero t gives a sphere that passes exactly through all 3
+// corners and bulges by approximately t out of the triangle plane.
+// Returns false if the triangle is degenerate.
+CurveKID_API bool fit_circumsphere(
+    const GEO::vec3& p0,
+    const GEO::vec3& p1,
+    const GEO::vec3& p2,
+    double           t,          // normal offset: try circumradius * 0.5
+    GEO::vec3&       center,
+    double&          radius
+);
+
+// Synthetic mode: fit one CurvedFace per coarse triangle using circumsphere.
+// Exact corners preserved. t_factor controls curvature: sphere centre is at
+//   circumcenter + t_factor * circumradius * face_normal
+// Shared arcs resolved afterward by resolve_shared_arcs.
+CurveKID_API void fit_curved_faces_synthetic(
+    const GEO::Mesh&         coarse_mesh,
+    std::vector<CurvedFace>& cfaces,
+    double                   t_factor = 0.5
+);
+
+// Tessellate with shared-arc awareness.
+// For each coarse edge, the arc vertices come from edge_winner[f*3+e]'s sphere.
+// Interior vertices come from the face's own sphere.
+CurveKID_API void tessellate_curved_faces_v2(
+    const GEO::Mesh&                   coarse_mesh,
+    const std::vector<CurvedFace>&     cfaces,
+    const std::vector<GEO::index_t>&   edge_winner,
+    GEO::Mesh&                         viz_mesh,
+    int                                subdiv = 4
+);
+
+// Compute per-original-vertex approximation error against the FLAT coarse mesh.
+// This is E_planar(N): mean/max distance of original vertices to the nearest
+// flat triangle of the coarse mesh.  Used to compare against E_curved(N).
+CurveKID_API void compute_planar_approximation_error(
+    const GEO::Mesh& original,
+    const GEO::Mesh& coarse_flat,
+    std::vector<double>& errors
+);
+
+// Fit one SphericalFace per mesh triangle.
+// Uses: vertex positions + vertex normals (from vcurv) to constrain sphere.
+// Falls back to CentralSphere from the most-curved corner when LS fails.
+CurveKID_API void initialize_spherical_faces(
+    const GEO::Mesh&                    mesh,
+    const std::vector<VertexCurvature>& vcurv,
+    const std::vector<CentralSphere>&   cspheres,
+    std::vector<SphericalFace>&         sfaces
+);
 
 } // namespace CurveKIDAlgo
 } // namespace OGF
