@@ -145,8 +145,9 @@ namespace OGF {
          * \param subdiv Subdivision per curved face for visualization only.
          */
         void build_coarse_curved_mesh(
-            int N      = 200,
-            int subdiv = 6
+            int    N      = 200,
+            int    subdiv = 6,
+            double alpha  = 1.0
         );
 
         /**
@@ -170,6 +171,125 @@ namespace OGF {
 
         /**
          * \menu /CurveKID
+         * \brief K=1 ICOSAHEDRAL BASELINE: build 20 congruent spherical
+         *        triangular patches on a unit sphere using icosahedral
+         *        connectivity. All 20 faces share the SAME supporting sphere
+         *        (the unit sphere) → K=1 trivially. All 30 edges are
+         *        great-circle arcs → C0 compatible by construction.
+         *        Verifies: rigid congruence (K=1), C0 boundary compatibility,
+         *        zero self-intersections, fidelity vs dense reference sphere.
+         *        This is the positive control for the full CurveKID objective.
+         *        (ChatGPT Direction 017 — positive control experiment)
+         * \param subdiv  Subdivision per edge for tessellation (default 6).
+         * \param radius  Sphere radius (default 1.0).
+         */
+        void build_icosahedral_baseline(
+            int    subdiv = 6,
+            double radius = 1.0
+        );
+
+        /**
+         * \menu /CurveKID
+         * \brief PANEL GEOMETRY DIAGNOSTIC: for each coarse face report
+         *        sphere parameters, interior displacement, branch validity,
+         *        triangle quality. Writes colour-mapped error mesh.
+         *        (ChatGPT Direction 018)
+         * \param coarse_mesh_path Path to the flat coarse mesh.
+         * \param subdiv           Subdivision for tessellation.
+         */
+        void diagnose_panel_geometry(
+            std::string coarse_mesh_path = "",
+            int         subdiv           = 6
+        );
+
+        /**
+         * \menu /CurveKID
+         * \brief PHASE A — DR. KID STYLE: construct curved patches via
+         *        subdivision + projection onto the original dense mesh.
+         *        Does NOT use independent sphere fitting.
+         *        Steps: CVT coarse mesh → barycentric subdivision →
+         *        closest-point projection onto M_GT → Laplacian smoothing
+         *        → reproject → store parent_face_id per vertex/triangle.
+         *        Shared edges generated once and shared by both patches.
+         *        Returns a geometrically valid curved mesh that lies on
+         *        the original surface with zero bulging artefacts.
+         *        (ChatGPT Architecture 019, Phase A)
+         * \param coarse_mesh_path  Path to the CVT coarse flat mesh.
+         * \param subdiv            Subdivision frequency per coarse edge.
+         * \param smooth_iters      Laplacian smoothing iterations (default 3).
+         * \param smooth_lambda     Smoothing weight 0..1 (default 0.5).
+         */
+        void construct_reference_curved_patches(
+            std::string coarse_mesh_path = "",
+            int         subdiv           = 6,
+            int         smooth_iters     = 3,
+            double      smooth_lambda    = 0.5
+        );
+
+        /**
+         * \menu /CurveKID
+         * \brief TEMPLATE RIGIDITY DIAGNOSTIC (ChatGPT Decision 5):
+         *        For each K-means class, extract patches' ordered boundary and
+         *        interior vertices, rigidly register each patch to the class
+         *        representative (R + t, NO scaling), then report:
+         *          - boundary RMS, interior RMS, max mismatch per class
+         *          - class occupancy including singleton classes
+         *          - overall reuse quality: mean and worst-class boundary RMS
+         *        Writes per-class statistics to log and a CSV file.
+         *        Run classify_phase_a_patches first (needs template_id attribute).
+         * \param phase_a_mesh_path  Path to classified Phase A .geogram mesh (ref_curved_patches_s_classified.geogram).
+         * \param coarse_mesh_path   Path to the coarse flat mesh (.obj).
+         * \param edgemap_path       Path to the .edgemap.txt file (ref_curved_patches_s6.edgemap.txt). Leave empty to auto-derive.
+         * \param subdiv             Subdivision level used in Phase A (must match).
+         */
+        void diagnose_template_rigidity(
+            std::string phase_a_mesh_path = "",
+            std::string coarse_mesh_path  = "",
+            std::string edgemap_path      = "",
+            int         subdiv            = 6
+        );
+
+        /**
+         * \menu /CurveKID
+         * \brief PHASE A EDGES: Extract the actual curved patch boundary polylines
+         *        directly from the Phase A subdivided mesh (ref_curved_patches_sN.geogram).
+         *        Unlike build_curved_edges (which uses sphere-based great-circle arcs),
+         *        this command reads the shared coarse-edge vertex sequences that are
+         *        already embedded in the Phase A mesh and emits them as a polyline mesh.
+         *        These are the TRUE curved boundaries of each patch — geodesic curves
+         *        on M_GT, not sphere arcs. The result is a polyline mesh named
+         *        "phase_a_boundary_edges" showing the patch network on the surface.
+         * \param phase_a_mesh_path  Path to the Phase A .geogram mesh.
+         * \param coarse_mesh_path   Path to the coarse flat mesh (.obj).
+         * \param subdiv             Subdivision level used in Phase A (must match).
+         */
+        void build_phase_a_edges(
+            std::string phase_a_mesh_path = "",
+            std::string coarse_mesh_path  = "",
+            int         subdiv            = 6
+        );
+
+        /**
+         * \menu /CurveKID
+         * \brief PHASE B: Classify Phase A reference curved patches into K
+         *        template classes using geometric descriptors (edge lengths,
+         *        area, normal variation). Reads parent_face_id from the Phase A
+         *        .geogram mesh, runs K-means on 6D descriptors, writes
+         *        template_id attribute. Load the output .geogram and paint by
+         *        template_id to see K-class colour map.
+         *        (ChatGPT Direction 021 — Phase B)
+         * \param phase_a_mesh_path  Path to Phase A .geogram mesh (with parent_face_id).
+         * \param coarse_mesh_path   Path to the coarse flat mesh (.obj or .geogram).
+         * \param K                  Number of template classes (default 10).
+         */
+        void classify_phase_a_patches(
+            std::string phase_a_mesh_path  = "",
+            std::string coarse_mesh_path   = "",
+            int         K                  = 10
+        );
+
+        /**
+         * \menu /CurveKID
          * \brief FIT CURVED FACES onto a pre-built coarse mesh.
          *        Use Graphite's Surface->Remesh->Remesh isotropic first to get
          *        a topologically valid coarse mesh, save it, then call this.
@@ -181,7 +301,8 @@ namespace OGF {
          */
         void fit_curved_to_coarse(
             std::string coarse_mesh_path = "",
-            int         subdiv           = 4
+            int         subdiv           = 4,
+            double      alpha            = 1.0
         );
 
         /**
@@ -238,6 +359,48 @@ namespace OGF {
         void build_curved_edges(
             std::string coarse_mesh_path = "",
             int         arc_pts          = 20
+        );
+
+        /**
+         * \menu /CurveKID
+         * \brief TORUS EXPERIMENT: generate four variants A/B/C/D from the
+         *        same coarse mesh and report quantitative comparison.
+         *        A=planar, B=independent sphere, C=joint opt, D=error-selected.
+         *        Saves <coarse>_varA/B/C/D.obj and logs error table.
+         * \param coarse_mesh_path Path to the coarse flat mesh (.obj/.geogram).
+         * \param subdiv           Subdivision for tessellation.
+         */
+        void torus_experiment(
+            std::string coarse_mesh_path = "",
+            int         subdiv           = 6
+        );
+
+        /**
+         * \menu /CurveKID
+         * \brief ALPHA SWEEP: evaluate E_rendered for alpha=0,0.2,0.4,0.6,0.8,1.0
+         *        on a fixed coarse mesh. Reports E_M2V, E_V2M, sphere_dev for each.
+         *        (ChatGPT Research Direction 008)
+         * \param coarse_mesh_path Path to the flat coarse mesh.
+         * \param subdiv           Subdivision for tessellation.
+         */
+        void alpha_sweep(
+            std::string coarse_mesh_path = "",
+            int         subdiv           = 6
+        );
+
+        /**
+         * \menu /CurveKID
+         * \brief DIAGNOSTIC: test sphere compatibility for all interior coarse
+         *        edges. Reports PROPER_COMPATIBLE vs PROPER_INCOMPATIBLE counts,
+         *        endpoint-to-circle error, sphere incidence error.
+         *        Does NOT modify any geometry.
+         *        (ChatGPT Direction 011)
+         * \param coarse_mesh_path Path to the flat coarse mesh.
+         * \param endpoint_tol     Tolerance for endpoint-on-circle test.
+         */
+        void diagnose_sphere_compatibility(
+            std::string coarse_mesh_path = "",
+            double      endpoint_tol     = 1e-4
         );
     };
 

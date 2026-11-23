@@ -1298,7 +1298,8 @@ static GEO::index_t build_coarse_mesh_decimate(
 void fit_curved_faces(
     const GEO::Mesh&         original,
     const GEO::Mesh&         coarse_mesh,
-    std::vector<CurvedFace>& cfaces)
+    std::vector<CurvedFace>& cfaces,
+    SphereFittingMode        mode)
 {
     const GEO::index_t nf_coarse = coarse_mesh.facets.nb();
     cfaces.resize(nf_coarse);
@@ -1588,13 +1589,140 @@ void fit_curved_faces(
         for (auto& q : nbr_pts) sum_r += GEO::length(q - C);
         double R = sum_r / (double)n;
 
+        // ---------------------------------------------------------------
+        // CONSTRAINED CORNER INTERPOLATION (Experiment C / Method C)
+        //
+        // Override C and R with the circumcenter-lift parametrisation:
+        //   C(t) = cc + t * n_face_unit
+        //   R(t) = sqrt(rcc² + t²)
+        // This guarantees all 3 coarse corners lie exactly on the sphere.
+        //
+        // The lift t is chosen to minimise the algebraic objective:
+        //   E(t) = Σ_i ( |q_i - C(t)|² - R²(t) )²
+        //
+        // Expanding: let d_i = q_i - cc, a_i = d_i · n_face_unit
+        //   |q_i - C(t)|² = |d_i - t*n|² = |d_i|² - 2t·a_i + t²
+        //   R²(t) = rcc² + t²
+        //   f_i(t) = |d_i|² - 2t·a_i + t² - rcc² - t²
+        //          = |d_i|² - rcc² - 2t·a_i          (t² cancels)
+        //
+        // dE/dt = Σ 2·f_i·(-2·a_i) = 0
+        //   → t = Σ(|d_i|² - rcc²)·a_i / (2·Σ a_i²)   (closed-form, linear)
+        //
+        // Note: this IS a valid minimiser of the algebraic objective,
+        // not geometric distance. The t² cancellation makes it linear.
+        // ChatGPT correctly notes geometric distance requires a 1D solver,
+        // but algebraic distance admits this closed-form solution.
+        // ---------------------------------------------------------------
+        if (mode == SphereFittingMode::CONSTRAINED_CORNER_INTERPOLATION) {
+            // Circumcenter of the 3 coarse corners
+            GEO::vec3 e1c = p[1]-p[0], e2c = p[2]-p[0];
+            GEO::vec3 nc  = GEO::cross(e1c, e2c);
+            double nc_len = GEO::length(nc);
+            if (nc_len > 1e-14) {
+                GEO::vec3 n_unit = nc * (1.0/nc_len);
+                double d1c  = GEO::dot(e1c,e1c), d2c = GEO::dot(e2c,e2c);
+                double d12c = GEO::dot(e1c,e2c);
+                double denoC = 2.0 * nc_len * nc_len;
+                double l1c = d2c*(d1c-d12c)/denoC, l2c = d1c*(d2c-d12c)/denoC;
+                GEO::vec3 cc_c = p[0] + e1c*l1c + e2c*l2c;
+                double rcc_c = GEO::length(cc_c - p[0]);
+
+                // Use the unconstrained Pottmann centre C (already computed)
+                // to initialise t. This anchors the constrained fit near the
+                // correct global curvature scale, then adjusts only enough to
+                // make the 3 corners lie exactly on the sphere.
+                // t_pottmann = projection of C onto the circumcenter-lift line
+                double t_pottmann = GEO::dot(C - cc_c, n_unit);
+
+                // Closed-form t from 7 dense samples (algebraic objective)
+                // minimises Σ(|q_i - C(t)|² - R²(t))²
+                // = Σ(|d_i|² - rcc² - 2t·a_i)²   where d_i=q_i-cc, a_i=d_i·n
+                // dE/dt = 0 → t = Σ(|d_i|²-rcc²)·a_i / (2·Σ a_i²)
+                double num_t = 0.0, den_t = 0.0;
+                for (auto& q : nbr_pts) {
+                    GEO::vec3 d_i = q - cc_c;
+                    double a_i  = GEO::dot(d_i, n_unit);
+                    double dsq  = GEO::dot(d_i, d_i);
+                    num_t += (dsq - rcc_c*rcc_c) * a_i;
+                    den_t += 2.0 * a_i * a_i;
+                }
+                double t_algebraic = (std::fabs(den_t) > 1e-14)
+                                     ? num_t/den_t : t_pottmann;
+
+                // Blend: weight algebraic t by sample quality vs Pottmann t.
+                // If |t_algebraic| is unreasonably different from |t_pottmann|
+                // (more than 3× off), fall back to Pottmann t with small
+                // correction. This prevents small-sphere collapse on
+                // highly-curved regions where the algebraic objective diverges.
+                double t_c;
+                if (std::fabs(t_pottmann) > 1e-10 &&
+                    std::fabs(t_algebraic / t_pottmann) < 3.0 &&
+                    std::fabs(t_algebraic / t_pottmann) > 0.33) {
+                    t_c = t_algebraic;  // algebraic solution is reasonable
+                } else {
+                    // Fall back: use Pottmann t (preserves global scale),
+                    // which already gives corner_res = small (not exactly 0,
+                    // but we accept this gracefully for degenerate cases).
+                    t_c = t_pottmann;
+                }
+
+                // Minimum lift to avoid near-flat sphere
+                if (std::fabs(t_c) < rcc_c * 0.05)
+                    t_c = (t_c >= 0.0) ? rcc_c*0.05 : -rcc_c*0.05;
+
+                C = cc_c + n_unit * t_c;
+                R = std::sqrt(rcc_c*rcc_c + t_c*t_c);  // exact for all 3 corners
+            }
+        }
+
         // Reject if R is implausibly small
         if (R < 1e-10) continue;
+
+        // ---------------------------------------------------------------
+        // SPHERE QUALITY METRICS — logged for the torus experiment
+        // (ChatGPT Feedback 003: validate before freezing any decision rule)
+        //
+        // We compute E_plane and E_sphere over the 7 reference samples,
+        // normalised by circumradius h_f. No face is rejected here based
+        // on these metrics — that decision requires a validated experiment.
+        // The only rejection is R < 1e-10 (degenerate) above.
+        //
+        // These metrics are stored in sphere_residual for later analysis.
+        // ---------------------------------------------------------------
+
+        // Compute E_sphere = mean (|q_i - C| - R)²
+        double rms2 = 0.0;
+        for (auto& q : nbr_pts) {
+            double e = GEO::length(q - C) - R;
+            rms2 += e*e;
+        }
+        double sphere_rms = std::sqrt(rms2 / (double)n);
+
+        // Compute E_plane = mean |dot(q_i - centroid, n_face)|²
+        GEO::vec3 n_face = GEO::cross(p[1]-p[0], p[2]-p[0]);
+        double nl = GEO::length(n_face);
+        if (nl > 1e-14) n_face = n_face * (1.0/nl);
+        double e_plane_sum = 0.0;
+        for (auto& q : nbr_pts) {
+            double dp = GEO::dot(q - centroid, n_face);
+            e_plane_sum += dp*dp;
+        }
+        double plane_rms = std::sqrt(e_plane_sum / (double)n);
+
+        // Scale-independent errors (normalised by circumradius h_f)
+        // E_S_hat = sphere_rms / circum_r
+        // E_P_hat = plane_rms  / circum_r
+        // These are logged via sphere_residual for the experiment.
+        // A face where E_S_hat > E_P_hat (sphere worse than plane)
+        // is a candidate for planar fallback — but we do NOT reject it
+        // here until the four-variant experiment confirms this criterion.
+        (void)plane_rms; // used in experiment logging below
 
         cf.sphere_center   = C;
         cf.sphere_radius   = R;
         cf.valid           = true;
-        cf.sphere_residual = 0.0;
+        cf.sphere_residual = sphere_rms / circum_r; // scale-independent metric
     }
 }
 
@@ -1612,17 +1740,26 @@ void fit_curved_faces(
 //   E_sphere: coarse vertices lie on their face's sphere
 //   E_smooth: adjacent spheres intersect at a smooth angle (angle → 0)
 //
-// We use alternating least-squares (Gauss-Newton style):
-//   Step A: fix coarse vertex positions, update sphere (C,R) per face
-//           by least-squares through the 3 vertices.
-//   Step B: fix spheres, move each coarse vertex to its mean projection
-//           across all faces that share it.
-// Repeat for max_iter iterations. This converges when coarse vertices
-// lie on all their adjacent spheres simultaneously.
+// Helmut Pottmann 2023 Section 4 — proper three-step alternating LS:
 //
-// After convergence, every shared edge is the intersection circle of
-// the two adjacent spheres — the shared arc is well-defined and lies
-// on BOTH spheres exactly.
+//   Step A: fix vertex positions, refit sphere (C,R) per face using
+//           BOTH face corners AND shared-edge vertices from neighbours
+//           (weighted LS so shared vertices pull the sphere toward
+//           compatibility with the adjacent face's sphere).
+//
+//   Step B: fix spheres, move each interior coarse vertex to its
+//           mean projection across all adjacent spheres.
+//
+//   Step C: for each interior edge (va,vb), project va and vb onto
+//           the intersection circle of the two adjacent spheres.
+//           This directly enforces PROPER_COMPATIBLE on that edge.
+//           Only applied when the two spheres have a proper intersection.
+//
+// Steps A→B→C iterated. Convergence: shared-edge vertices lie on
+// both adjacent spheres → E_incidence → 0 → all edges PROPER_COMPATIBLE.
+//
+// w_shared controls Step A edge weight (0=original, 0.3=recommended).
+// w_circle controls Step C circle projection strength (0=off, 1=full).
 
 void optimise_joint_spheres(
     GEO::Mesh&                 coarse_mesh,
@@ -1632,12 +1769,16 @@ void optimise_joint_spheres(
     const GEO::index_t nf = coarse_mesh.facets.nb();
     const GEO::index_t nv = coarse_mesh.vertices.nb();
 
+    // Tuning parameters
+    const double w_shared = 0.5;  // Step A: weight of shared-edge vertices
+    const double w_circle = 0.8;  // Step C: blend toward intersection circle (0=off,1=full)
+
     // Working copy of coarse vertex positions
     std::vector<GEO::vec3> vpos(nv);
     for (GEO::index_t v = 0; v < nv; ++v)
         vpos[v] = vertex_point(coarse_mesh, v);
 
-    // Build vertex → faces map (only valid/interior faces)
+    // Build vertex → faces map (only valid faces)
     std::vector<std::vector<GEO::index_t>> v2f(nv);
     for (GEO::index_t f = 0; f < nf; ++f) {
         if (!cfaces[f].valid) continue;
@@ -1645,88 +1786,168 @@ void optimise_joint_spheres(
             v2f[cfaces[f].v[k]].push_back(f);
     }
 
-    // Mark boundary vertices — on any edge with only 1 adjacent face.
-    // These vertices must NOT move in Step B: they anchor the open boundary.
+    // Mark boundary vertices (on edges with no adjacent face) — never moved
     std::vector<bool> is_boundary_v(nv, false);
     for (GEO::index_t f = 0; f < nf; ++f) {
         if (coarse_mesh.facets.nb_vertices(f) < 3) continue;
         for (GEO::index_t le = 0; le < coarse_mesh.facets.nb_vertices(f); ++le) {
             if (coarse_mesh.facets.adjacent(f, le) == GEO::NO_FACET) {
-                // This edge is a boundary edge — mark both its vertices
                 is_boundary_v[coarse_mesh.facets.vertex(f, le)] = true;
                 is_boundary_v[coarse_mesh.facets.vertex(f, (le+1)%3)] = true;
             }
         }
     }
 
+    // Helper: fit sphere to a weighted set of points using the
+    // circumcenter-lift method, stabilised by the previous sphere centre.
+    // Returns true on success.
+    auto fit_sphere_weighted = [&](
+        const std::vector<GEO::vec3>& pts,
+        const std::vector<double>&    wts,
+        const GEO::vec3&              prev_C,
+        GEO::vec3&                    C_out,
+        double&                       R_out) -> bool
+    {
+        // Weighted centroid
+        GEO::vec3 centroid(0,0,0);
+        double    w_sum = 0.0;
+        for (size_t i = 0; i < pts.size(); ++i) {
+            centroid = centroid + pts[i] * wts[i];
+            w_sum   += wts[i];
+        }
+        if (w_sum < 1e-14) return false;
+        centroid = centroid * (1.0 / w_sum);
+
+        // Approximate face normal from first 3 points (corners of the face)
+        if (pts.size() < 3) return false;
+        GEO::vec3 e1 = pts[1] - pts[0], e2 = pts[2] - pts[0];
+        GEO::vec3 n  = GEO::cross(e1, e2);
+        double n_len = GEO::length(n);
+        if (n_len < 1e-14) return false;
+        GEO::vec3 n_unit = n * (1.0 / n_len);
+
+        // Circumcenter of the 3 face corners (first 3 points)
+        double d1 = GEO::dot(e1,e1), d2 = GEO::dot(e2,e2), d12 = GEO::dot(e1,e2);
+        double denom = 2.0 * n_len * n_len;
+        double l1 = d2*(d1-d12)/denom, l2 = d1*(d2-d12)/denom;
+        GEO::vec3 cc = pts[0] + e1*l1 + e2*l2;
+        double rcc = GEO::length(cc - pts[0]);
+
+        // t: lift along face normal, chosen closest to prev sphere centre
+        double t = GEO::dot(prev_C - cc, n_unit);
+        double t_min_abs = rcc * 0.05;
+        if (std::fabs(t) < t_min_abs)
+            t = (t >= 0.0) ? t_min_abs : -t_min_abs;
+
+        // With the shared-vertex constraint: additionally minimise
+        // Σ_shared w_i * (|p_i - C|² - R²)² w.r.t. R, keeping C fixed.
+        // Optimal R² = Σ w_i |p_i - C|² / Σ w_i  (weighted mean sq distance)
+        GEO::vec3 C_candidate = cc + n_unit * t;
+        double R_sq_sum = 0.0, w_total = 0.0;
+        for (size_t i = 0; i < pts.size(); ++i) {
+            double dist_sq = GEO::dot(pts[i]-C_candidate, pts[i]-C_candidate);
+            R_sq_sum += wts[i] * dist_sq;
+            w_total  += wts[i];
+        }
+        double R_candidate = std::sqrt(std::max(0.0, R_sq_sum / w_total));
+        if (R_candidate < 1e-10) return false;
+
+        C_out = C_candidate;
+        R_out = R_candidate;
+        return true;
+    };
+
+    // Helper: compute intersection circle of two spheres.
+    // Returns false if not a proper intersection.
+    auto intersection_circle = [&](
+        const GEO::vec3& C1, double R1,
+        const GEO::vec3& C2, double R2,
+        GEO::vec3& O_out, double& r_out, GEO::vec3& n_out) -> bool
+    {
+        GEO::vec3 d_vec = C2 - C1;
+        double d = GEO::length(d_vec);
+        if (d < 1e-14) return false;
+        GEO::vec3 n_unit = d_vec * (1.0 / d);
+
+        // Check proper intersection: |R1-R2| < d < R1+R2
+        if (d >= R1 + R2 - 1e-10) return false;
+        if (d <= std::fabs(R1 - R2) + 1e-10) return false;
+
+        double a = (R1*R1 - R2*R2 + d*d) / (2.0 * d);
+        double r_sq = R1*R1 - a*a;
+        if (r_sq < 0.0) return false;
+
+        O_out = C1 + n_unit * a;
+        r_out = std::sqrt(r_sq);
+        n_out = n_unit;
+        return true;
+    };
+
+    // Helper: project a point onto a circle (O, r, n).
+    // Returns the nearest point on the circle.
+    auto project_to_circle = [&](
+        const GEO::vec3& pt,
+        const GEO::vec3& O, double r, const GEO::vec3& n) -> GEO::vec3
+    {
+        // Project pt into the circle's plane
+        GEO::vec3 rel = pt - O;
+        GEO::vec3 in_plane = rel - n * GEO::dot(rel, n);
+        double len = GEO::length(in_plane);
+        if (len < 1e-14) {
+            // pt is at circle centre — pick arbitrary direction
+            GEO::vec3 ref(1,0,0);
+            if (std::fabs(GEO::dot(n, ref)) > 0.9) ref = GEO::vec3(0,1,0);
+            GEO::vec3 u = GEO::normalize(GEO::cross(n, ref));
+            return O + u * r;
+        }
+        return O + in_plane * (r / len);
+    };
+
     for (int iter = 0; iter < max_iter; ++iter) {
 
-        // ---- Step A: refit sphere to current 3 coarse vertices ----
-        // For a triangle with 3 points + their original normals, solve
-        // the minimal-residual sphere using 4×4 LS (sphere through 3
-        // pts is underdetermined in R³ — we add the centroid normal
-        // constraint to pin the solution). Simpler: use the closed-form
-        // circumsphere lifted by mean curvature, re-evaluated at current
-        // vertex positions.
+        // ================================================================
+        // Step A: refit sphere per face, including shared-edge vertices
+        //         from adjacent faces with weight w_shared.
+        // ================================================================
         for (GEO::index_t f = 0; f < nf; ++f) {
             CurvedFace& cf = cfaces[f];
             if (!cf.valid) continue;
 
-            GEO::vec3 p[3];
-            for (int k = 0; k < 3; ++k) p[k] = vpos[cf.v[k]];
+            // Collect weighted points: face corners (weight 1.0)
+            std::vector<GEO::vec3> pts;
+            std::vector<double>    wts;
+            for (int k = 0; k < 3; ++k) {
+                pts.push_back(vpos[cf.v[k]]);
+                wts.push_back(1.0);
+            }
 
-            // Fit sphere through exactly 3 points + normal direction.
-            // The 3 points define a circle; the sphere centre lies on the
-            // line through the circumcenter perpendicular to the triangle.
-            // We choose the sphere centre as:
-            //   C = circumcenter + t * face_normal
-            // where t minimises |C - p[i]|² consistency.
-            // For 3 points on a sphere: |C-p0|=|C-p1|=|C-p2|=R.
-            // The circumcenter already satisfies |cc-p0|=|cc-p1|=|cc-p2|=rcc.
-            // With C = cc + t*n: R² = rcc² + t².
-            // t is a free parameter — we choose t to minimise displacement
-            // from the previous sphere centre (stability).
-            GEO::vec3 e1 = p[1]-p[0], e2 = p[2]-p[0];
-            GEO::vec3 n  = GEO::cross(e1, e2);
-            double n_len = GEO::length(n);
-            if (n_len < 1e-14) continue;
-            GEO::vec3 n_unit = n * (1.0/n_len);
+            // Add shared-edge vertices from adjacent faces (weight w_shared)
+            if (w_shared > 0.0) {
+                for (GEO::index_t le = 0; le < 3; ++le) {
+                    GEO::index_t adj = coarse_mesh.facets.adjacent(f, le);
+                    if (adj == GEO::NO_FACET || !cfaces[adj].valid) continue;
+                    // The two vertices of this shared edge
+                    GEO::index_t va = coarse_mesh.facets.vertex(f, le);
+                    GEO::index_t vb = coarse_mesh.facets.vertex(f, (le+1)%3);
+                    pts.push_back(vpos[va]);  wts.push_back(w_shared);
+                    pts.push_back(vpos[vb]);  wts.push_back(w_shared);
+                }
+            }
 
-            // Circumcenter in the triangle plane
-            double d1 = GEO::dot(e1,e1), d2 = GEO::dot(e2,e2), d12 = GEO::dot(e1,e2);
-            double denom = 2.0 * n_len * n_len;
-            double l1 = d2*(d1-d12)/denom, l2 = d1*(d2-d12)/denom;
-            GEO::vec3 cc = p[0] + e1*l1 + e2*l2;
-            double rcc = GEO::length(cc - p[0]);
-
-            // Choose t so C is closest to previous sphere centre
-            GEO::vec3 prev_C = cf.sphere_center;
-            double t = GEO::dot(prev_C - cc, n_unit);
-
-            // Clamp t to keep the sphere from becoming degenerate
-            // Min |t| ensures sphere has visible curvature
-            // (don't let it collapse to circumscribed circle)
-            double t_min_abs = rcc * 0.05; // at least 5% lift
-            if (std::fabs(t) < t_min_abs)
-                t = (t >= 0.0) ? t_min_abs : -t_min_abs;
-
-            GEO::vec3 C = cc + n_unit * t;
-            double R = std::sqrt(rcc*rcc + t*t);
-
-            cf.sphere_center = C;
-            cf.sphere_radius  = R;
-            cf.sphere_residual = 0.0;
+            GEO::vec3 C_new; double R_new;
+            if (fit_sphere_weighted(pts, wts, cf.sphere_center, C_new, R_new)) {
+                cf.sphere_center  = C_new;
+                cf.sphere_radius  = R_new;
+                cf.sphere_residual = 0.0;
+            }
         }
 
-        // ---- Step B: move each coarse vertex to mean projection ----
-        // Each vertex is shared by several faces, each with a different sphere.
-        // Move the vertex to the mean of its projections onto all adjacent
-        // spheres. This pulls the vertex toward the intersection of all adjacent
-        // spheres — the converged position lies on all of them simultaneously.
+        // ================================================================
+        // Step B: move each interior coarse vertex to mean sphere projection
+        // ================================================================
         std::vector<GEO::vec3> new_vpos = vpos;
         for (GEO::index_t v = 0; v < nv; ++v) {
-            if (v2f[v].empty()) continue;
-            if (is_boundary_v[v]) continue;  // never move boundary vertices
+            if (v2f[v].empty() || is_boundary_v[v]) continue;
             GEO::vec3 mean_proj(0,0,0);
             int cnt = 0;
             for (GEO::index_t f : v2f[v]) {
@@ -1743,18 +1964,73 @@ void optimise_joint_spheres(
                 new_vpos[v] = mean_proj * (1.0/cnt);
         }
 
-        // Compute max vertex displacement for convergence check
+        // Convergence check on vertex displacement (before Step C)
         double max_disp = 0.0;
         for (GEO::index_t v = 0; v < nv; ++v)
             max_disp = std::max(max_disp, GEO::length(new_vpos[v] - vpos[v]));
-
         vpos = new_vpos;
+
+        // ================================================================
+        // Step C: project shared-edge vertices onto intersection circles
+        //
+        // For each interior edge (va, vb) between face fa and face fb:
+        //   1. Compute the intersection circle (O, r, n) of Sa and Sb.
+        //   2. Project va and vb onto that circle.
+        //   3. Blend: va_new = va*(1-w) + proj_va*w  (soft constraint)
+        //
+        // This directly enforces PROPER_COMPATIBLE on the edge.
+        // After this step, va and vb lie on both spheres (up to blend).
+        // ================================================================
+        if (w_circle > 0.0) {
+            // Accumulate blended positions (a vertex may appear on multiple edges)
+            std::vector<GEO::vec3> circle_sum(nv, GEO::vec3(0,0,0));
+            std::vector<int>       circle_cnt(nv, 0);
+
+            for (GEO::index_t f = 0; f < nf; ++f) {
+                if (!cfaces[f].valid) continue;
+                for (GEO::index_t le = 0; le < 3; ++le) {
+                    GEO::index_t adj = coarse_mesh.facets.adjacent(f, le);
+                    if (adj == GEO::NO_FACET || adj <= f) continue; // each edge once
+                    if (!cfaces[adj].valid) continue;
+
+                    GEO::index_t va = coarse_mesh.facets.vertex(f, le);
+                    GEO::index_t vb = coarse_mesh.facets.vertex(f, (le+1)%3);
+
+                    GEO::vec3 O; double r; GEO::vec3 n_circ;
+                    if (!intersection_circle(
+                            cfaces[f].sphere_center,   cfaces[f].sphere_radius,
+                            cfaces[adj].sphere_center, cfaces[adj].sphere_radius,
+                            O, r, n_circ)) continue;
+
+                    // Project va and vb onto intersection circle
+                    if (!is_boundary_v[va]) {
+                        GEO::vec3 proj = project_to_circle(vpos[va], O, r, n_circ);
+                        circle_sum[va] = circle_sum[va] + proj;
+                        circle_cnt[va]++;
+                    }
+                    if (!is_boundary_v[vb]) {
+                        GEO::vec3 proj = project_to_circle(vpos[vb], O, r, n_circ);
+                        circle_sum[vb] = circle_sum[vb] + proj;
+                        circle_cnt[vb]++;
+                    }
+                }
+            }
+
+            // Apply blended Step C update
+            for (GEO::index_t v = 0; v < nv; ++v) {
+                if (circle_cnt[v] == 0 || is_boundary_v[v]) continue;
+                GEO::vec3 circle_target = circle_sum[v] * (1.0 / circle_cnt[v]);
+                vpos[v] = vpos[v] * (1.0 - w_circle) + circle_target * w_circle;
+            }
+        }
 
         if (max_disp < 1e-8) {
             GEO::Logger::out("CurveKID")
                 << "  Joint opt converged at iter " << iter
                 << " (max_disp=" << max_disp << ")" << std::endl;
-            break;
+            // Don't break early — Step C may still be moving vertices
+            // Only break if we've done enough iterations
+            if (iter >= 5) break;
         }
     }
 
@@ -1949,6 +2225,288 @@ static double point_to_triangle_dist(
     return GEO::length(p - closest);
 }
 
+// =======================================================================
+// SPHERE COMPATIBILITY DIAGNOSTICS
+// =======================================================================
+
+static bool sphere_sphere_intersection_circle(
+    const GEO::vec3& C1, double R1,
+    const GEO::vec3& C2, double R2,
+    GEO::vec3& O, double& r, GEO::vec3& n_unit,
+    double eps = 1e-10)
+{
+    GEO::vec3 d_vec = C2 - C1;
+    double d = GEO::length(d_vec);
+    if (d < eps) return false; // concentric
+    n_unit = d_vec * (1.0/d);
+    double sum_r = R1 + R2;
+    double diff_r = std::fabs(R1 - R2);
+    if (d > sum_r + eps) return false;  // disjoint
+    if (d < diff_r - eps) return false; // contained
+    double a = (R1*R1 - R2*R2 + d*d) / (2.0*d);
+    double r2 = R1*R1 - a*a;
+    if (r2 < 0.0) r2 = 0.0;
+    O = C1 + n_unit * a;
+    r = std::sqrt(r2);
+    return true;
+}
+
+static double point_to_circle_dist(
+    const GEO::vec3& pt, const GEO::vec3& O,
+    double r, const GEO::vec3& n_unit)
+{
+    // Project pt onto circle plane
+    GEO::vec3 rel = pt - O;
+    double along_n = GEO::dot(rel, n_unit);
+    GEO::vec3 in_plane = rel - n_unit * along_n;
+    double in_plane_len = GEO::length(in_plane);
+    // Closest point on circle
+    GEO::vec3 closest;
+    if (in_plane_len < 1e-14)
+        closest = O; // pt on axis — any point on circle is equidistant
+    else
+        closest = O + in_plane * (r / in_plane_len);
+    return GEO::length(pt - closest);
+}
+
+CompatibilityReport diagnose_sphere_compatibility(
+    const GEO::Mesh&               coarse_mesh,
+    const std::vector<CurvedFace>& cfaces,
+    std::vector<EdgeDiagnostic>&   diagnostics,
+    double                         endpoint_tol,
+    bool                           log_results)
+{
+    CompatibilityReport rep;
+    diagnostics.clear();
+
+    const GEO::index_t nf = coarse_mesh.facets.nb();
+
+    // Build edge → (face_a, face_b) map
+    struct PairHash {
+        size_t operator()(std::pair<GEO::index_t,GEO::index_t> p) const {
+            return std::hash<uint64_t>()((uint64_t)p.first<<32|(uint64_t)p.second);
+        }
+    };
+    std::unordered_map<std::pair<GEO::index_t,GEO::index_t>,
+                       std::pair<GEO::index_t,GEO::index_t>, PairHash> edge_map;
+
+    for (GEO::index_t f = 0; f < nf; ++f) {
+        if (coarse_mesh.facets.nb_vertices(f) < 3) continue;
+        for (GEO::index_t le = 0; le < 3; ++le) {
+            GEO::index_t va = coarse_mesh.facets.vertex(f, le);
+            GEO::index_t vb = coarse_mesh.facets.vertex(f, (le+1)%3);
+            if (va > vb) std::swap(va, vb);
+            auto key = std::make_pair(va, vb);
+            auto it = edge_map.find(key);
+            if (it == edge_map.end())
+                edge_map[key] = {f, GEO::NO_FACET};
+            else if (it->second.second == GEO::NO_FACET)
+                it->second.second = f;
+        }
+    }
+
+    double sum_ep2 = 0, sum_inc2 = 0;
+    int ep_cnt = 0, inc_cnt = 0;
+
+    for (auto& [key, faces] : edge_map) {
+        EdgeDiagnostic diag;
+        diag.va = key.first; diag.vb = key.second;
+        diag.face_a = faces.first; diag.face_b = faces.second;
+        diag.e_endpoint = 0; diag.e_incidence = 0;
+        diag.sphere_dist = 0; diag.intersection_circle_r = 0;
+
+        if (faces.second == GEO::NO_FACET) {
+            diag.compat = EdgeCompatibility::BOUNDARY_EDGE;
+            ++rep.n_boundary_edges;
+            diagnostics.push_back(diag);
+            continue;
+        }
+        ++rep.n_interior_edges;
+
+        const CurvedFace& cf_a = cfaces[faces.first];
+        const CurvedFace& cf_b = cfaces[faces.second];
+
+        GEO::vec3 va_pt = vertex_point(coarse_mesh, diag.va);
+        GEO::vec3 vb_pt = vertex_point(coarse_mesh, diag.vb);
+
+        // Sphere incidence: how well do edge endpoints lie on each sphere
+        double e_inc = 0;
+        if (cf_a.valid) {
+            e_inc = std::max(e_inc, std::fabs(GEO::length(va_pt-cf_a.sphere_center)-cf_a.sphere_radius));
+            e_inc = std::max(e_inc, std::fabs(GEO::length(vb_pt-cf_a.sphere_center)-cf_a.sphere_radius));
+        }
+        if (cf_b.valid) {
+            e_inc = std::max(e_inc, std::fabs(GEO::length(va_pt-cf_b.sphere_center)-cf_b.sphere_radius));
+            e_inc = std::max(e_inc, std::fabs(GEO::length(vb_pt-cf_b.sphere_center)-cf_b.sphere_radius));
+        }
+        diag.e_incidence = e_inc;
+        sum_inc2 += e_inc*e_inc; ++inc_cnt;
+        rep.max_incidence_err = std::max(rep.max_incidence_err, e_inc);
+
+        if (!cf_a.valid || !cf_b.valid) {
+            diag.compat = EdgeCompatibility::NUMERICALLY_DEGENERATE;
+            ++rep.n_degenerate;
+            diagnostics.push_back(diag);
+            continue;
+        }
+
+        diag.sphere_dist = GEO::length(cf_b.sphere_center - cf_a.sphere_center);
+
+        // Attempt intersection circle
+        GEO::vec3 O; double r; GEO::vec3 n_unit;
+        bool has_circle = sphere_sphere_intersection_circle(
+            cf_a.sphere_center, cf_a.sphere_radius,
+            cf_b.sphere_center, cf_b.sphere_radius,
+            O, r, n_unit);
+
+        if (!has_circle) {
+            // Check for tangent
+            double d = diag.sphere_dist;
+            double sum_r = cf_a.sphere_radius + cf_b.sphere_radius;
+            double diff_r = std::fabs(cf_a.sphere_radius - cf_b.sphere_radius);
+            if (std::fabs(d - sum_r) < 1e-6 || std::fabs(d - diff_r) < 1e-6)
+                diag.compat = EdgeCompatibility::TANGENT, ++rep.n_tangent;
+            else
+                diag.compat = EdgeCompatibility::DISJOINT_OR_CONTAINED, ++rep.n_disjoint;
+            diagnostics.push_back(diag);
+            continue;
+        }
+
+        diag.intersection_circle_r = r;
+
+        if (r < 1e-10) {
+            diag.compat = EdgeCompatibility::TANGENT;
+            ++rep.n_tangent;
+            diagnostics.push_back(diag);
+            continue;
+        }
+
+        // Check if endpoints lie on the intersection circle
+        double ep_a = point_to_circle_dist(va_pt, O, r, n_unit);
+        double ep_b = point_to_circle_dist(vb_pt, O, r, n_unit);
+        diag.e_endpoint = std::max(ep_a, ep_b);
+        sum_ep2 += diag.e_endpoint * diag.e_endpoint; ++ep_cnt;
+        rep.max_endpoint_err = std::max(rep.max_endpoint_err, diag.e_endpoint);
+
+        if (diag.e_endpoint < endpoint_tol) {
+            diag.compat = EdgeCompatibility::PROPER_COMPATIBLE;
+            ++rep.n_proper_compatible;
+        } else {
+            diag.compat = EdgeCompatibility::PROPER_INCOMPATIBLE;
+            ++rep.n_proper_incompatible;
+        }
+        diagnostics.push_back(diag);
+    }
+
+    rep.rms_endpoint_err  = ep_cnt  > 0 ? std::sqrt(sum_ep2  / ep_cnt)  : 0;
+    rep.rms_incidence_err = inc_cnt > 0 ? std::sqrt(sum_inc2 / inc_cnt) : 0;
+
+    if (log_results) {
+        int n_int = rep.n_interior_edges;
+        GEO::Logger::out("CurveKID") << "  === Sphere Compatibility Diagnostics ===" << std::endl;
+        GEO::Logger::out("CurveKID") << "  Interior edges: " << n_int << "  Boundary: " << rep.n_boundary_edges << std::endl;
+        GEO::Logger::out("CurveKID") << "  PROPER_COMPATIBLE:   " << rep.n_proper_compatible
+            << " (" << (n_int>0?100.0*rep.n_proper_compatible/n_int:0) << "%)" << std::endl;
+        GEO::Logger::out("CurveKID") << "  PROPER_INCOMPATIBLE: " << rep.n_proper_incompatible
+            << " (" << (n_int>0?100.0*rep.n_proper_incompatible/n_int:0) << "%)" << std::endl;
+        GEO::Logger::out("CurveKID") << "  DISJOINT/CONTAINED:  " << rep.n_disjoint << std::endl;
+        GEO::Logger::out("CurveKID") << "  TANGENT:             " << rep.n_tangent << std::endl;
+        GEO::Logger::out("CurveKID") << "  DEGENERATE:          " << rep.n_degenerate << std::endl;
+        GEO::Logger::out("CurveKID") << "  Endpoint err: rms=" << rep.rms_endpoint_err
+            << "  max=" << rep.max_endpoint_err << std::endl;
+        GEO::Logger::out("CurveKID") << "  Incidence err: rms=" << rep.rms_incidence_err
+            << "  max=" << rep.max_incidence_err << std::endl;
+    }
+    return rep;
+}
+
+// Compute E_rendered: M→V and V→M directed RMS using point-to-triangle distance.
+// E_M2V: for each vertex of M, nearest triangle in V.
+// E_V2M: for each vertex of V, nearest triangle in M.
+// Also computes max_sphere_dev: for each viz vertex, distance to its face's sphere.
+void compute_rendered_errors(
+    const GEO::Mesh&               original,  // M
+    const GEO::Mesh&               viz_mesh,  // V (tessellated)
+    const std::vector<CurvedFace>& cfaces,    // for sphere deviation
+    double& rms_M2V, double& max_M2V,
+    double& rms_V2M, double& max_V2M,
+    double& rms_sphere_dev, double& max_sphere_dev)
+{
+    // E_M→V: original vertices → viz mesh triangles
+    {
+        double sum2 = 0.0; max_M2V = 0.0;
+        const GEO::index_t nv = original.vertices.nb();
+        const GEO::index_t nf = viz_mesh.facets.nb();
+        for (GEO::index_t v = 0; v < nv; ++v) {
+            GEO::vec3 pt = vertex_point(original, v);
+            double best = std::numeric_limits<double>::max();
+            for (GEO::index_t f = 0; f < nf; ++f) {
+                if (viz_mesh.facets.nb_vertices(f) < 3) continue;
+                GEO::vec3 a = vertex_point(viz_mesh, viz_mesh.facets.vertex(f,0));
+                GEO::vec3 b = vertex_point(viz_mesh, viz_mesh.facets.vertex(f,1));
+                GEO::vec3 c = vertex_point(viz_mesh, viz_mesh.facets.vertex(f,2));
+                best = std::min(best, point_to_triangle_dist(pt, a, b, c));
+            }
+            if (best < 1e30) { sum2 += best*best; max_M2V = std::max(max_M2V, best); }
+        }
+        rms_M2V = (nv > 0) ? std::sqrt(sum2/nv) : 0.0;
+    }
+
+    // E_V→M: viz vertices → original mesh triangles
+    {
+        double sum2 = 0.0; max_V2M = 0.0;
+        const GEO::index_t nv = viz_mesh.vertices.nb();
+        const GEO::index_t nf = original.facets.nb();
+        for (GEO::index_t v = 0; v < nv; ++v) {
+            GEO::vec3 pt = vertex_point(viz_mesh, v);
+            double best = std::numeric_limits<double>::max();
+            for (GEO::index_t f = 0; f < nf; ++f) {
+                if (original.facets.nb_vertices(f) < 3) continue;
+                GEO::vec3 a = vertex_point(original, original.facets.vertex(f,0));
+                GEO::vec3 b = vertex_point(original, original.facets.vertex(f,1));
+                GEO::vec3 c = vertex_point(original, original.facets.vertex(f,2));
+                best = std::min(best, point_to_triangle_dist(pt, a, b, c));
+            }
+            if (best < 1e30) { sum2 += best*best; max_V2M = std::max(max_V2M, best); }
+        }
+        rms_V2M = (nv > 0) ? std::sqrt(sum2/nv) : 0.0;
+    }
+
+    // Sphere deviation: for each viz vertex, distance to its face's supporting sphere.
+    // Requires curved_face_id attribute on viz_mesh faces.
+    // We approximate: for each viz vertex, find nearest cface and compute deviation.
+    {
+        double sum2 = 0.0; max_sphere_dev = 0.0; int cnt = 0;
+        // Build face→sphere lookup from curved_face_id attribute
+        GEO::Attribute<int> attr;
+        bool has_attr = viz_mesh.facets.attributes().is_defined("curved_face_id");
+        if (has_attr) attr.bind(viz_mesh.facets.attributes(), "curved_face_id");
+
+        // For each viz vertex, average sphere deviation across adjacent faces
+        const GEO::index_t nv = viz_mesh.vertices.nb();
+        std::vector<double> vdev(nv, 0.0);
+        std::vector<int> vcnt(nv, 0);
+        for (GEO::index_t f = 0; f < viz_mesh.facets.nb(); ++f) {
+            if (!has_attr) continue;
+            int fid = attr[f];
+            if (fid < 0 || fid >= (int)cfaces.size() || !cfaces[fid].valid) continue;
+            const CurvedFace& cf = cfaces[fid];
+            for (int k = 0; k < 3; ++k) {
+                GEO::index_t v = viz_mesh.facets.vertex(f, k);
+                GEO::vec3 pt = vertex_point(viz_mesh, v);
+                double d = std::fabs(GEO::length(pt - cf.sphere_center) - cf.sphere_radius);
+                vdev[v] += d; vcnt[v]++;
+            }
+        }
+        for (GEO::index_t v = 0; v < nv; ++v) {
+            if (vcnt[v] == 0) continue;
+            double d = vdev[v] / vcnt[v];
+            sum2 += d*d; max_sphere_dev = std::max(max_sphere_dev, d); ++cnt;
+        }
+        rms_sphere_dev = (cnt > 0) ? std::sqrt(sum2/cnt) : 0.0;
+    }
+}
+
 void compute_planar_approximation_error(
     const GEO::Mesh& original,
     const GEO::Mesh& coarse_flat,
@@ -2130,7 +2688,9 @@ void tessellate_curved_faces_v2(
     const std::vector<CurvedFace>&     cfaces,
     const std::vector<GEO::index_t>&   /*edge_winner — unused, shared-edge approach*/,
     GEO::Mesh&                         viz_mesh,
-    int                                subdiv)
+    int                                subdiv,
+    double                             alpha,
+    TessellationMode                   tess_mode)
 {
     // -----------------------------------------------------------------------
     // WATERTIGHT shared-edge tessellation (same approach as build_sphere_ground_truth).
@@ -2169,7 +2729,10 @@ void tessellate_curved_faces_v2(
         coarse_circum_r[f] = (ar > 1e-14) ? (a*b*c2)/(4.0*ar) : (a+b+c2)/3.0;
     }
 
-    // Helper: project point onto a face's sphere (with flat fallback)
+    // Helper: project point onto a face's sphere, blended with flat by alpha.
+    // alpha=1.0 → full sphere projection (may overlap adjacent patches)
+    // alpha=0.7 → 70% curved, reduces visual overlap while preserving character
+    // alpha=0.0 → flat (no projection)
     auto proj_onto_face = [&](GEO::index_t fw, GEO::vec3 pt) -> GEO::vec3 {
         if (fw >= (GEO::index_t)cfaces.size() || !cfaces[fw].valid) return pt;
         const CurvedFace& cf = cfaces[fw];
@@ -2177,7 +2740,8 @@ void tessellate_curved_faces_v2(
         GEO::vec3 d = pt - cf.sphere_center;
         double len = GEO::length(d);
         if (len < 1e-14) return pt;
-        return cf.sphere_center + d * (cf.sphere_radius / len);
+        GEO::vec3 proj = cf.sphere_center + d * (cf.sphere_radius / len);
+        return pt * (1.0 - alpha) + proj * alpha;  // blend flat ↔ sphere
     };
 
     // Helper: slerp on a face's sphere between two points
@@ -2199,7 +2763,9 @@ void tessellate_curved_faces_v2(
         if (std::fabs(theta) < 1e-10) return C + ua*R;
         GEO::vec3 interp = ua*(std::sin((1-t)*theta)/std::sin(theta))
                          + ub*(std::sin(t*theta)    /std::sin(theta));
-        return C + interp * R;
+        GEO::vec3 slerp_pt = C + interp * R;
+        GEO::vec3 flat_pt  = pa*(1-t) + pb*t;
+        return flat_pt * (1.0 - alpha) + slerp_pt * alpha;
     };
 
     // --- Step 1: add coarse vertices to viz_mesh (index == coarse vertex index) ---
@@ -2245,11 +2811,36 @@ void tessellate_curved_faces_v2(
         }
     }
 
+    // Build boundary edge set from coarse mesh adjacency.
+    // A boundary edge has NO_FACET as its adjacent face.
+    // These edges must use flat interpolation to avoid protrusions at holes.
+    std::set<std::pair<GEO::index_t,GEO::index_t>> boundary_edges;
+    for (GEO::index_t f = 0; f < coarse_mesh.facets.nb(); ++f) {
+        for (GEO::index_t le = 0; le < coarse_mesh.facets.nb_vertices(f); ++le) {
+            if (coarse_mesh.facets.adjacent(f, le) == GEO::NO_FACET) {
+                GEO::index_t va = coarse_mesh.facets.vertex(f, le);
+                GEO::index_t vb = coarse_mesh.facets.vertex(f, (le+1)%3);
+                boundary_edges.insert({std::min(va,vb), std::max(va,vb)});
+            }
+        }
+    }
+
+    // Build edge → second face map (the face on the OTHER side of each edge)
+    // edge_to_face already has the LOWER-index face; we need the other one too.
+    std::map<std::pair<GEO::index_t,GEO::index_t>, GEO::index_t> edge_to_adj_face;
+    for (GEO::index_t f = 0; f < (GEO::index_t)cfaces.size(); ++f) {
+        const CurvedFace& cf = cfaces[f];
+        for (int le = 0; le < 3; ++le) {
+            GEO::index_t va = cf.v[le], vb = cf.v[(le+1)%3];
+            GEO::index_t lo = std::min(va,vb), hi = std::max(va,vb);
+            auto key = std::make_pair(lo,hi);
+            auto it = edge_to_face.find(key);
+            if (it != edge_to_face.end() && it->second != f)
+                edge_to_adj_face[key] = f;  // f is the second face for this edge
+        }
+    }
+
     // edge_pts: canonical edge → vector of (subdiv-1) viz_mesh vertex indices, dir lo→hi
-    // ALL edge points are projected onto the OWNER face's sphere — same as interior.
-    // This means ALL points on a face patch lie on its sphere → no tent distortion.
-    // Adjacent faces that share an edge use THE SAME edge points (same owner sphere)
-    // → watertight by construction.
     std::map<std::pair<GEO::index_t,GEO::index_t>, std::vector<GEO::index_t>> edge_pts;
 
     auto get_edge_pts = [&](GEO::index_t va, GEO::index_t vb)
@@ -2261,27 +2852,42 @@ void tessellate_curved_faces_v2(
         auto key = std::make_pair(lo, hi);
         auto it = edge_pts.find(key);
         if (it == edge_pts.end()) {
-            // Find owner face — the first (lowest-index) valid face owning this edge
-            GEO::index_t owner = GEO::NO_FACET;
+            // Owner = lower-index valid face; adj = other valid face (if any)
+            GEO::index_t owner = GEO::NO_FACET, adj = GEO::NO_FACET;
             auto fit = edge_to_face.find(key);
             if (fit != edge_to_face.end()) owner = fit->second;
+            auto ait = edge_to_adj_face.find(key);
+            if (ait != edge_to_adj_face.end()) adj = ait->second;
 
-            GEO::vec3 plo = vertex_point(coarse_mesh, lo);
+            GEO::vec3 plo   = vertex_point(coarse_mesh, lo);
             GEO::vec3 phi_v = vertex_point(coarse_mesh, hi);
+            bool is_bnd = boundary_edges.count({lo, hi}) > 0;
 
             std::vector<GEO::index_t> ids;
             for (int s = 1; s < subdiv; ++s) {
                 double t = double(s) / double(subdiv);
                 GEO::vec3 pt;
-                if (owner != GEO::NO_FACET && cfaces[owner].valid) {
-                    // After joint optimisation, plo and phi_v both lie on the
-                    // owner sphere. Use slerp on the owner sphere → arc lies
-                    // exactly on the sphere surface. This is the correct shared
-                    // circular arc from Pottmann 2023.
-                    pt = slerp_on_face(owner, plo, phi_v, t);
-                } else {
+
+                if (is_bnd || owner == GEO::NO_FACET || !cfaces[owner].valid) {
+                    // Boundary or no valid owner: flat linear
                     pt = plo*(1.0-t) + phi_v*t;
+
+                } else if (tess_mode == TessellationMode::BLENDED_SHARED_EDGE_DEBUG
+                           && adj != GEO::NO_FACET && cfaces[adj].valid) {
+                    // BLENDED_SHARED_EDGE_DEBUG:
+                    // Average slerp from both adjacent spheres.
+                    // e(t) = 0.5 * slerp_owner(t) + 0.5 * slerp_adj(t)
+                    // Both faces will use this identical position → zero seam.
+                    // Label: "blended approximation — not exact spherical panel"
+                    GEO::vec3 pt_owner = slerp_on_face(owner, plo, phi_v, t);
+                    GEO::vec3 pt_adj   = slerp_on_face(adj,   plo, phi_v, t);
+                    pt = pt_owner * 0.5 + pt_adj * 0.5;
+
+                } else {
+                    // OWNER_SPHERE (original) or no adj: slerp on owner only
+                    pt = slerp_on_face(owner, plo, phi_v, t);
                 }
+
                 GEO::index_t idx = viz_mesh.vertices.create_vertices(1);
                 double* vp = viz_mesh.vertices.point_ptr(idx);
                 vp[0]=pt.x; vp[1]=pt.y; vp[2]=pt.z;
